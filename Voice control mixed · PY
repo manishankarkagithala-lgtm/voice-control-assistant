@@ -1,0 +1,380 @@
+import speech_recognition as sr
+import pyttsx3
+import os
+import subprocess
+import webbrowser
+import pyautogui
+import time
+import sys
+
+# ─────────────────────────────────────────
+#  SETUP
+# ─────────────────────────────────────────
+recognizer = sr.Recognizer()
+engine = pyttsx3.init()
+engine.setProperty('rate', 160)
+engine.setProperty('volume', 1.0)
+
+# Language priority order for recognition
+# te-IN = Telugu, hi-IN = Hindi, en-IN = English (India)
+LANGUAGES = ["te-IN", "hi-IN", "en-IN", "en-US"]
+
+def speak(text):
+    """Speak response in English."""
+    print(f"🤖 Assistant: {text}")
+    engine.say(text)
+    engine.runAndWait()
+
+def listen():
+    """
+    Try recognizing speech in Telugu, Hindi, and English.
+    Returns the recognized text (lowercased) or empty string.
+    """
+    with sr.Microphone() as source:
+        print("\n🎤 Listening... (Telugu / Hindi / English lo matladandi)")
+        recognizer.adjust_for_ambient_noise(source, duration=0.5)
+        try:
+            audio = recognizer.listen(source, timeout=6, phrase_time_limit=10)
+        except sr.WaitTimeoutError:
+            print("⏱️ No speech detected.")
+            return ""
+
+    # Try each language until one succeeds
+    for lang in LANGUAGES:
+        try:
+            command = recognizer.recognize_google(audio, language=lang).lower()
+            print(f"✅ Recognized [{lang}]: {command}")
+            return command
+        except sr.UnknownValueError:
+            continue
+        except sr.RequestError:
+            speak("Internet connection issue. Please check your connection.")
+            return ""
+
+    print("❓ Could not understand in any language.")
+    return ""
+
+# ─────────────────────────────────────────
+#  MIXED LANGUAGE KEYWORD MAPS
+#  Telugu / Hindi / English triggers
+# ─────────────────────────────────────────
+
+# Keywords to OPEN APPS
+APP_KEYWORDS = {
+    # Chrome
+    "chrome":           "chrome",
+    "browser":          "chrome",
+    "browser tero":     "chrome",
+    "internet tero":    "chrome",
+    # Notepad
+    "notepad":          "notepad",
+    "notes":            "notepad",
+    "notes tero":       "notepad",
+    # Calculator
+    "calculator":       "calculator",
+    "calc":             "calculator",
+    "calculator tero":  "calculator",
+    "calculation":      "calculator",
+    # File Explorer
+    "file explorer":    "explorer",
+    "files":            "explorer",
+    "folder tero":      "explorer",
+    "files chupinchu":  "explorer",
+    # Paint
+    "paint":            "paint",
+    # Task Manager
+    "task manager":     "taskmgr",
+    "tasks":            "taskmgr",
+    # VS Code
+    "vs code":          "vscode",
+    "code":             "vscode",
+    "visual studio":    "vscode",
+}
+
+APP_PATHS = {
+    "chrome":    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    "notepad":   "notepad.exe",
+    "calculator":"calc.exe",
+    "explorer":  "explorer.exe",
+    "paint":     "mspaint.exe",
+    "taskmgr":   "taskmgr.exe",
+    "vscode":    r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe",
+}
+
+# Keywords to SEARCH
+SEARCH_KEYWORDS = [
+    "search", "google", "find",
+    "search cheyyi", "vethuku", "search chey",   # Telugu
+    "dhundho", "search karo", "google karo",      # Hindi
+]
+
+# Keywords for YOUTUBE
+YOUTUBE_KEYWORDS = [
+    "youtube", "video chupinchu", "video play cheyyi",  # Telugu
+    "youtube pe chalo", "video dekho",                   # Hindi
+]
+
+# Keywords for VOLUME
+VOLUME_UP_KEYWORDS    = ["volume up", "sound penchу", "sound penchu", "awaaz badhao", "increase volume"]
+VOLUME_DOWN_KEYWORDS  = ["volume down", "sound taginchu", "awaaz kam karo", "decrease volume"]
+MUTE_KEYWORDS         = ["mute", "sound band cheyyi", "chup", "quiet", "awaaz band karo"]
+
+# Keywords for SCREENSHOT
+SCREENSHOT_KEYWORDS   = ["screenshot", "screen capture", "screen teeyyi", "snap cheyyi", "screenshot lo"]
+
+# Keywords for LOCK
+LOCK_KEYWORDS         = ["lock", "lock cheyyi", "lock karo", "screen lock"]
+
+# Keywords for SLEEP
+SLEEP_KEYWORDS        = ["sleep", "sleep mode", "rest cheyyi", "so ja"]
+
+# Keywords for SHUTDOWN
+SHUTDOWN_KEYWORDS     = ["shutdown", "shut down", "band cheyyi", "computer band", "band karo"]
+
+# Keywords for RESTART
+RESTART_KEYWORDS      = ["restart", "reboot", "restart cheyyi", "phir se chalu karo"]
+
+# Keywords for CANCEL
+CANCEL_KEYWORDS       = ["cancel", "cancel cheyyi", "rukja", "rok do", "stop"]
+
+# Keywords for EXIT (stop the assistant)
+EXIT_KEYWORDS         = ["exit", "quit", "bye", "goodbye", "band", "stop assistant",
+                         "assistant band cheyyi", "vellu", "close assistant"]
+
+# Keywords for HELP
+HELP_KEYWORDS         = ["help", "help cheyyi", "commands chupinchu", "emi cheyagalanu",
+                         "kya kar sakte ho", "help karo"]
+
+# Direct websites
+WEBSITE_MAP = {
+    "google":    "https://www.google.com",
+    "youtube":   "https://www.youtube.com",
+    "github":    "https://www.github.com",
+    "whatsapp":  "https://web.whatsapp.com",
+    "instagram": "https://www.instagram.com",
+    "twitter":   "https://www.twitter.com",
+    "facebook":  "https://www.facebook.com",
+    "gmail":     "https://mail.google.com",
+    "claude":    "https://claude.ai",
+    "chatgpt":   "https://chat.openai.com",
+}
+
+OPEN_KEYWORDS = ["open", "tero", "chupinchu", "kholo", "chalu karo", "launch"]
+
+# ─────────────────────────────────────────
+#  COMMAND HANDLERS
+# ─────────────────────────────────────────
+
+def contains_any(command, keywords):
+    return any(kw in command for kw in keywords)
+
+def handle_exit(command):
+    if contains_any(command, EXIT_KEYWORDS):
+        speak("Okay! Voice control stopped. Bye bye!")
+        sys.exit(0)
+    return False
+
+def handle_help(command):
+    if contains_any(command, HELP_KEYWORDS):
+        show_help()
+        speak("Here are all your available commands.")
+        return True
+    return False
+
+def handle_open_app(command):
+    for keyword, app_key in APP_KEYWORDS.items():
+        if keyword in command:
+            app_path = APP_PATHS.get(app_key, "")
+            if app_path:
+                speak(f"Opening {app_key}")
+                try:
+                    os.startfile(os.path.expandvars(app_path))
+                except Exception:
+                    subprocess.Popen(app_path, shell=True)
+                return True
+    return False
+
+def handle_open_website(command):
+    # Check for "open <site>" pattern
+    for trigger in OPEN_KEYWORDS:
+        if trigger in command:
+            for site, url in WEBSITE_MAP.items():
+                if site in command:
+                    speak(f"Opening {site}")
+                    webbrowser.open(url)
+                    return True
+    return False
+
+def handle_search(command):
+    if contains_any(command, SEARCH_KEYWORDS) and not contains_any(command, YOUTUBE_KEYWORDS):
+        # Extract query by removing search keywords
+        query = command
+        for kw in SEARCH_KEYWORDS:
+            query = query.replace(kw, "")
+        query = query.replace("for", "").replace("lo", "").replace("kosam", "").strip()
+        if query:
+            speak(f"Searching Google for {query}")
+            webbrowser.open(f"https://www.google.com/search?q={query}")
+        else:
+            speak("What would you like to search for?")
+        return True
+    return False
+
+def handle_youtube(command):
+    if contains_any(command, YOUTUBE_KEYWORDS):
+        query = command
+        for kw in YOUTUBE_KEYWORDS + ["search", "play", "chupinchu", "lo"]:
+            query = query.replace(kw, "")
+        query = query.strip()
+        if query:
+            speak(f"Searching YouTube for {query}")
+            webbrowser.open(f"https://www.youtube.com/results?search_query={query}")
+        else:
+            speak("Opening YouTube")
+            webbrowser.open("https://www.youtube.com")
+        return True
+    return False
+
+def handle_volume(command):
+    if contains_any(command, VOLUME_UP_KEYWORDS):
+        for _ in range(5): pyautogui.press("volumeup")
+        speak("Volume increased")
+        return True
+    if contains_any(command, VOLUME_DOWN_KEYWORDS):
+        for _ in range(5): pyautogui.press("volumedown")
+        speak("Volume decreased")
+        return True
+    if contains_any(command, MUTE_KEYWORDS):
+        pyautogui.press("volumemute")
+        speak("Toggled mute")
+        return True
+    return False
+
+def handle_screenshot(command):
+    if contains_any(command, SCREENSHOT_KEYWORDS):
+        speak("Taking a screenshot")
+        pyautogui.hotkey("win", "prtsc")
+        speak("Screenshot saved to your Pictures folder")
+        return True
+    return False
+
+def handle_type(command):
+    if command.startswith("type "):
+        text = command.replace("type ", "", 1)
+        speak(f"Typing: {text}")
+        time.sleep(0.5)
+        pyautogui.typewrite(text, interval=0.05)
+        return True
+    return False
+
+def handle_system(command):
+    if contains_any(command, SHUTDOWN_KEYWORDS):
+        speak("Shutting down the computer in 10 seconds. Say cancel to stop.")
+        os.system("shutdown /s /t 10")
+        return True
+    if contains_any(command, RESTART_KEYWORDS):
+        speak("Restarting the computer in 10 seconds.")
+        os.system("shutdown /r /t 10")
+        return True
+    if contains_any(command, CANCEL_KEYWORDS):
+        os.system("shutdown /a")
+        speak("Shutdown cancelled.")
+        return True
+    if contains_any(command, LOCK_KEYWORDS):
+        speak("Locking the screen")
+        os.system("rundll32.exe user32.dll,LockWorkStation")
+        return True
+    if contains_any(command, SLEEP_KEYWORDS):
+        speak("Putting the computer to sleep")
+        os.system("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
+        return True
+    return False
+
+# ─────────────────────────────────────────
+#  HELP DISPLAY
+# ─────────────────────────────────────────
+def show_help():
+    print("""
+╔══════════════════════════════════════════════════════════════╗
+║       🎙️  MIXED LANGUAGE VOICE CONTROL — COMMAND LIST        ║
+╠══════════════════════════════════════════════════════════════╣
+║  APPS (Telugu/Hindi/English)                                 ║
+║   "chrome tero" / "browser kholo" / "open chrome"           ║
+║   "notepad tero" / "notes kholo" / "open notepad"           ║
+║   "calculator tero" / "calc kholo" / "open calculator"      ║
+║                                                              ║
+║  SEARCH                                                      ║
+║   "search cheyyi MVSR college"                               ║
+║   "google karo mechanical engineering"                       ║
+║   "find Python tutorials"                                    ║
+║                                                              ║
+║  YOUTUBE                                                     ║
+║   "youtube lo Telugu songs"                                  ║
+║   "youtube pe lo-fi music dekho"                             ║
+║   "video chupinchu AR Rahman"                                ║
+║                                                              ║
+║  WEBSITES                                                    ║
+║   "open whatsapp" / "whatsapp kholo"                         ║
+║   "open instagram" / "gmail tero"                            ║
+║                                                              ║
+║  VOLUME                                                      ║
+║   "volume up" / "sound penchu" / "awaaz badhao"             ║
+║   "volume down" / "sound taginchu" / "awaaz kam karo"       ║
+║   "mute" / "sound band cheyyi" / "chup"                     ║
+║                                                              ║
+║  SCREENSHOT                                                  ║
+║   "screenshot" / "screen teeyyi" / "snap cheyyi"            ║
+║                                                              ║
+║  SYSTEM                                                      ║
+║   "lock" / "lock cheyyi" / "lock karo"                      ║
+║   "sleep" / "rest cheyyi" / "so ja"                         ║
+║   "shutdown" / "band cheyyi" / "band karo"                  ║
+║   "restart" / "restart cheyyi" / "phir se chalu karo"       ║
+║   "cancel" / "rukja" / "rok do"                             ║
+║                                                              ║
+║  OTHER                                                       ║
+║   "help" / "help cheyyi" / "emi cheyagalanu"                ║
+║   "exit" / "bye" / "vellu" / "band"                         ║
+╚══════════════════════════════════════════════════════════════╝
+""")
+
+# ─────────────────────────────────────────
+#  MAIN LOOP
+# ─────────────────────────────────────────
+def process_command(command):
+    if not command:
+        return
+
+    handlers = [
+        handle_exit,
+        handle_help,
+        handle_system,
+        handle_volume,
+        handle_screenshot,
+        handle_type,
+        handle_youtube,
+        handle_search,
+        handle_open_website,
+        handle_open_app,
+    ]
+
+    for handler in handlers:
+        if handler(command):
+            return
+
+    speak(f"Sorry, I didn't understand that. Say help to see all commands.")
+
+def main():
+    print("=" * 65)
+    print("   🎙️  MIXED LANGUAGE VOICE CONTROL  (Telugu + Hindi + English)")
+    print("=" * 65)
+    show_help()
+    speak("Voice control active. You can speak in Telugu, Hindi, or English!")
+
+    while True:
+        command = listen()
+        if command:
+            process_command(command)
+
+if __name__ == "__main__":
+    main()
